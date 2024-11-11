@@ -20,6 +20,7 @@ import * as cf from '../../utils/common-flags';
 import { getBalenaSdk, stripIndent, getCliForm } from '../../utils/lazy';
 import type { Device } from 'balena-sdk';
 import { ExpectedError } from '../../errors';
+import { getExpandedProp } from '../../utils/pine';
 
 export default class DeviceOsUpdateCmd extends Command {
 	public static description = stripIndent`
@@ -115,6 +116,10 @@ export default class DeviceOsUpdateCmd extends Command {
 			);
 		}
 
+		const { HUPActionHelper, actionsConfig } = await import(
+			'balena-hup-action-utils'
+		);
+		const hupActionHelper = new HUPActionHelper(actionsConfig);
 		// Get target OS version
 		let targetOsVersion = options.version;
 		if (targetOsVersion != null) {
@@ -129,17 +134,40 @@ export default class DeviceOsUpdateCmd extends Command {
 			targetOsVersion = await getCliForm().ask({
 				message: 'Target OS version',
 				type: 'list',
-				choices: hupVersionInfo.versions.map((version) => ({
-					name:
-						hupVersionInfo.recommended === version
-							? `${version} (recommended)`
-							: version,
-					value: version,
-				})),
+				choices: hupVersionInfo.versions.map((version) => {
+					const takeoverRequired =
+						hupActionHelper.getHUPActionType(
+							getExpandedProp(is_of__device_type, 'slug')!,
+							currentOsVersion,
+							version,
+						) === 'takeover';
+
+					return {
+						name: `${
+							hupVersionInfo.recommended === version
+								? `${version} (recommended)`
+								: version
+						}${takeoverRequired ? ' WARNING: No rollback mechanism' : ''}`,
+						value: version,
+					};
+				}),
 			});
 		}
 
+		const takeoverRequired =
+			hupActionHelper.getHUPActionType(
+				getExpandedProp(is_of__device_type, 'slug')!,
+				currentOsVersion,
+				targetOsVersion,
+			) === 'takeover';
 		const patterns = await import('../../utils/patterns');
+		// Warn the user if the update requires a takeover
+		if (takeoverRequired) {
+			await patterns.confirm(
+				options.yes || false,
+				'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
+			);
+		}
 		// Confirm and start update
 		await patterns.confirm(
 			options.yes || false,
